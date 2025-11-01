@@ -2,14 +2,14 @@
 The core decorator logic
 """
 
-import datetime
+import time
 import functools
 import inspect
 import json
 import warnings
 from typing import Any, Callable, Dict
 
-from .constants import DEFAULT_LOG_FILE
+from .constants import DEFAULT_LOG_FILE, TIMESTAMP_FORMAT, RUNTIME_PRECISION
 from .exceptions import LoggerNonSerializableError, LoggerWriteError
 
 
@@ -17,7 +17,7 @@ def _get_func_args(
     func: Callable[..., Any], *args: Any, **kwargs: Any
 ) -> Dict[str, Any]:
     """
-    Maps all positonal and keyword arguments to their parameter names.
+    Figures out the names and values of all arguments passed to a function.
 
     We need to capture the name of the arguements (e.g., max_depth) and not just their values (e.g., 5).
     This function handles the logic of binding *args and **kwargs to the function signature.
@@ -30,18 +30,17 @@ def _get_func_args(
     try:
         # Bind the positional and keyword arguments to the function signature
         bound_args = inspect.signature(func).bind(*args, **kwargs)
-        # Apply the default for any missing arguements
+        # Fill in any default values for arguments that weren't provided.
         bound_args.apply_defaults()
         # Arguments is an OrderedDict, we convert it into plain dict
         return dict(bound_args.arguments)
     except Exception:
-        # Fallback for complex callables where binding might fail.
-        # this is less informative but safer than crashing.
+        # This 'try...except' is a safety net. Some special functions (like ones built-in to C) can't be inspected.
+        # If that happens, we don't want to crash. We just log the arguments in a "raw" format.
         warnings.warn(
-            f"[TinyLogger Warning] Could not inspect function "
-            f"signature for '{func.__name__}'. "
-            f"Logging raw positional and keyword args.",
-            stacklevel=3
+            f"[TinyLogger Warning] Could not figure out argument names for "
+            f"'{func.__name__}'. Logging them as raw '_args' and '_kwargs'.",
+            stacklevel=3,
         )
         return {"_args": args, "_kwargs": kwargs}
 
@@ -57,18 +56,21 @@ def _serialize_log_entry(entry: Dict[str, Any]) -> str:
     :return: A JSON string ending with a newline.
     """
     try:
-        # NOTE: default=str is a safe fallback for common non-serializable types like datetime objects,
-        # converting them to their string form.
+        # Convert the dictionary to a JSON string. We don't use `default=str` here,
+        # because we want it to fail if it finds something it can't convert (like an object).
         json_string = json.dumps(entry, default=str)
         return json_string + "\n"
     except TypeError as e:
-        # We catch the specific `TypeError` from json.dumps and re-raise it as our custom, more informative exception.
+        # This 'except' catches the failure from `json.dumps`.
+        # This happens if the user's function returned something
+        #   that isn't JSON-friendly (like a model object or a DataFrame).
+        # We re-raise this as our own custom error so the decorator can catch it and handle it gracefully.
         raise LoggerNonSerializableError(
             f"Failed to serialize log entry. "
-            f"Your function's arguments or return value (metrics) "
-            f"may contain objects that are not JSON-serializable. "
+            f"Your function's arguments or return value (metrics) may contain objects that are not JSON-serializable. "
             f"Original error: {e}"
         ) from e
+
 
 def log_run(log_file: str = DEFAULT_LOG_FILE) -> Callable[..., Any]:
     """
@@ -91,67 +93,69 @@ def log_run(log_file: str = DEFAULT_LOG_FILE) -> Callable[..., Any]:
             """
             The wrapper function that executes the logging logic.
 
-            :return: The original return value of the decorated function.
+            This function is what actually replaces the user's original function. It captures arguments,
+            runs the function, captures the result, and writes to the log.
+
+            :param args: Positional arguments passed to the wrapped function.
+            :param kwargs: Keyword arguments passed to the wrapped function.
+            :return: The original return value of the wrapped function.
             """
-            start_time = datetime.datetime.now(datetime.timezone.utc)
+            start_time = time.perf_counter()
 
-            # We run the user's function first. If it fails, we don't want to log a "run" that never completed.
+            # We do this before running the function, just in case the function itself fails.
+            func_args = _get_func_args(func, *args, **kwargs)
+
             try:
-                metrics = func(*args, **kwargs)
-            except Exception:
-                # If the user's function fails, we re-raise the error immediately. No logging should happen.
-                raise
+                # Run the user's original function
+                result = func(*args, **kwargs)
+            finally:
+                # A 'finally' block always runs, even if the function in the 'try' block crashed.
+                # This guarantees we always log how long it took.
+                end_time = time.perf_counter()
+                runtime = end_time - start_time
 
-            end_time = datetime.datetime.now(datetime.timezone.utc)
-            runtime_seconds = (end_time - start_time).total_seconds()
+            # Put all the log information into a dictionary
+            log_entry = {
+                "timestamp": time.strftime(TIMESTAMP_FORMAT, time.gmtime()),
+                "function_name": func.__name__,
+                "runtime_seconds": round(runtime, RUNTIME_PRECISION),
+                "params": func_args,
+                "metrics": result,
+            }
 
-            # The logging is a side-effect and must never crash the user's main script/
+            # try to write this log to the file. This whole section is wrapped in a 'try...except'
+            # so that if logging fails, it won't crash the user's script.
             try:
-                # Capture parameters
-                params = _get_func_args(func, *args, **kwargs)
-                # Build the log entry
-                log_entry: Dict[str, Any] = {
-                    "timestamp": start_time.isoformat(),
-                    "runtime_seconds": round(runtime_seconds, 4),
-                    "params": params,
-                    "metrics": metrics,
-                    "function_name": func.__name__,
-                }
-                # Serialize to JSONL string
-                log_line = _serialize_log_entry(log_entry)
+                # Convert the dictionary to a JSON string
+                json_string = _serialize_log_entry(log_entry)
 
-                # Write to file
-                # 'a' mode: Append to the file. Creates it if it doesn't exist.
-                # 'encoding="utf-8"': The only sane choice for text files.
-                with open(log_file, "a", encoding="utf-8") as f:
-                    f.write(log_line)
+                try:
+                    with open(
+                        # 'a' means "append" (add to the end of the file).
+                        # 'utf-8' is a standard text format.
+                        log_file, "a", encoding="utf-8"
+                    ) as f:
+                        f.write(json_string)
+                except (IOError, OSError) as e:
+                    # This catches file system errors, like if the disk is full or we don't have permission to write.
+                    raise LoggerWriteError(
+                        f"Failed to write log to file: {e}"
+                    ) from e
 
-            except (
-                LoggerNonSerializableError,
-                LoggerWriteError,
-                IOError,
-                PermissionError,
-            ) as e:
-                # We catch our custom errors and common file errors.
-                # We use `warnings.warn` instead of `print` because
-                # it's the standard way for libraries to signal non-fatal issues to a user.
+            except (LoggerNonSerializableError, LoggerWriteError) as e:
+                # NOTE: MOST IMPORTANT RULE: Never crash the user's script.
+                # If logging failed (for any reason), we just
+                # show a warning and let the user's script continue.
+
+                # 'stacklevel=2' tells the warning to point to the
+                # line in the user's code that called this function,
+                # which is much more helpful for debugging.
                 warnings.warn(
-                    f"[TinyLogger Warning] Failed to log run. "
-                    f"Your function's result was returned, but the log "
-                    f"was NOT written. \nError: {e}",
-                    stacklevel=2,
+                    f"[TinyLogger Warning] {e}",
+                    stacklevel=2
                 )
 
-            except Exception as e:
-                # A "catch-all" for any other unexpected logging error.
-                # This ensures nothing in the logging block can crash.
-                warnings.warn(
-                    f"[TinyLogger Warning] An unexpected error occurred "
-                    f"during logging: {e}",
-                    stacklevel=2,
-                )
-
-            return metrics
+            return result
 
         return wrapper
 
