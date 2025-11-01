@@ -47,6 +47,6 @@ This will create a `experiment_log.jsonl` file with one line per experiment:
 
 This tool is built for simplicity and has intentional trade-offs:
 
-1. Not Thread-Safe: This logger is NOT designed for concurrency. If you run functions in parallel (using multiprocessing or threading), you will corrupt your log file.
+1. Not Thread-Safe: This logger is NOT designed for concurrency. If you run functions in parallel (using multiprocessing or threading), you will corrupt your log file due to concurrent writes interleaving or overwriting each other.
 
 2. JSON-Serializable Data Only: The decorator assumes your function arguments and return values are "JSON-serializable" (strings, ints, floats, lists, dicts).
