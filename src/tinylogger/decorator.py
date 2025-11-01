@@ -56,9 +56,8 @@ def _serialize_log_entry(entry: Dict[str, Any]) -> str:
     :return: A JSON string ending with a newline.
     """
     try:
-        # Convert the dictionary to a JSON string. We don't use `default=str` here,
-        # because we want it to fail if it finds something it can't convert (like an object).
-        json_string = json.dumps(entry, default=str)
+        # Convert the dictionary to a JSON string.
+        json_string = json.dumps(entry)
         return json_string + "\n"
     except TypeError as e:
         # This 'except' catches the failure from `json.dumps`.
