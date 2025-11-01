@@ -18,11 +18,19 @@ class LoggerNonSerializableError(TypeError, LoggerError):
     This helps distinguish between a user's `TypeError` and one that
     occurs specifically during the logging process.
     """
-    
+
     DEFAULT_MESSAGE = (
         "Failed to serialize log entry. "
         "Ensure all arguments and return values are JSON-serializable."
     )
+
+
+    def __init__(self, original_error: Exception = None):
+        if original_error:
+            message = f"{self.DEFAULT_MESSAGE} Original error: {original_error}"
+        else:
+            message = self.DEFAULT_MESSAGE
+        super().__init__(message)
 
 
 class LoggerWriteError(IOError, LoggerError):
