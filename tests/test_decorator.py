@@ -11,20 +11,6 @@ import pytest
 from tinylogger.decorator import log_run
 
 
-@log_run(log_file="test_log.jsonl")
-def simple_model(param_a, param_b=10):
-    """A simple function to test argument logging."""
-    metric = param_a * param_b
-    return {"metric": metric}
-
-
-@log_run(log_file="test_log.jsonl")
-def non_serializable_model():
-    """A function that returns non-serializable data."""
-    # object() is not JSON-serializable
-    return {"metric": object()}
-
-
 @pytest.fixture(name="clean_log_file")
 def fixture_clean_log_file(tmp_path):
     """
@@ -44,7 +30,7 @@ def test_log_file_created_and_written(clean_log_file):
     Test that a log file is created and the content is correct.
     """
 
-    # We need to create a new decorated function that uses the *clean* log file
+    # We need to create a new decorated function that uses the clean log file
     @log_run(log_file=clean_log_file)
     def model(x):
         return {"y": x * 2}
@@ -117,7 +103,10 @@ def test_logging_failure_does_not_crash():
         mock_file.side_effect = PermissionError("Permission denied")
 
         # We must use `pytest.warns` to check that our warning was issued.
-        with pytest.warns(UserWarning, match="Failed to log run"):
+
+        # The original `match="Failed to log run"` was wrong.
+        # We update it to match the actual warning text.
+        with pytest.warns(UserWarning, match="Failed to write log to file"):
 
             @log_run(log_file="any_file.jsonl")
             def model(x):
@@ -137,7 +126,8 @@ def test_non_serializable_metrics_does_not_crash(clean_log_file):
 
     @log_run(log_file=clean_log_file)
     def model():
-        return {"metric": object()}  # Not serializable
+        # Not serializable
+        return {"metric": object()}
 
     # We check that a warning is issued and the script doesn't crash
     with pytest.warns(UserWarning, match="Failed to serialize"):
