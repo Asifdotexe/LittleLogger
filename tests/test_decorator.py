@@ -3,6 +3,7 @@ Tests for the tinylogger package.
 """
 
 import json
+from pathlib import Path
 from unittest.mock import mock_open, patch
 
 import pandas as pd
@@ -137,5 +138,5 @@ def test_non_serializable_metrics_does_not_crash(clean_log_file):
     assert isinstance(result["metric"], object)
 
     # The log file should be empty, as the write failed
-    with open(clean_log_file, "r", encoding="utf-8") as f:
-        assert f.read() == ""
+    log_path = Path(clean_log_file)
+    assert not log_path.exists() or log_path.read_text(encoding="utf-8") == ""
