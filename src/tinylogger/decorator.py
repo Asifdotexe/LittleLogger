@@ -2,14 +2,14 @@
 The core decorator logic
 """
 
-import time
 import functools
 import inspect
 import json
+import time
 import warnings
 from typing import Any, Callable, Dict
 
-from .constants import DEFAULT_LOG_FILE, TIMESTAMP_FORMAT, RUNTIME_PRECISION
+from .constants import DEFAULT_LOG_FILE, RUNTIME_PRECISION, TIMESTAMP_FORMAT
 from .exceptions import LoggerNonSerializableError, LoggerWriteError
 
 
@@ -132,14 +132,14 @@ def log_run(log_file: str = DEFAULT_LOG_FILE) -> Callable[..., Any]:
                     with open(
                         # 'a' means "append" (add to the end of the file).
                         # 'utf-8' is a standard text format.
-                        log_file, "a", encoding="utf-8"
+                        log_file,
+                        "a",
+                        encoding="utf-8",
                     ) as f:
                         f.write(json_string)
                 except (IOError, OSError) as e:
                     # This catches file system errors, like if the disk is full or we don't have permission to write.
-                    raise LoggerWriteError(
-                        f"Failed to write log to file: {e}"
-                    ) from e
+                    raise LoggerWriteError(f"Failed to write log to file: {e}") from e
 
             except (LoggerNonSerializableError, LoggerWriteError) as e:
                 # NOTE: MOST IMPORTANT RULE: Never crash the user's script.
@@ -149,10 +149,7 @@ def log_run(log_file: str = DEFAULT_LOG_FILE) -> Callable[..., Any]:
                 # 'stacklevel=2' tells the warning to point to the
                 # line in the user's code that called this function,
                 # which is much more helpful for debugging.
-                warnings.warn(
-                    f"[TinyLogger Warning] {e}",
-                    stacklevel=2
-                )
+                warnings.warn(f"[TinyLogger Warning] {e}", stacklevel=2)
 
             return result
 
