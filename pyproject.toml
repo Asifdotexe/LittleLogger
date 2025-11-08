@@ -36,10 +36,7 @@ Issues = "https://github.com/Asifdotexe/LittleLogger/issues"
 packages = [{include = "littlelogger", from = "src"}]
 
 [tool.poetry.group.dev.dependencies]
-pytest = [
-    { version = "^7.4.4", python = "==3.8" },
-    { version = "^8.4.2", python = ">=3.9" }
-]
+pytest = "^8.4.2"
 pandas = "^2.3.3"
 pylint = "^4.0.2"
 black = "^25.9.0"
