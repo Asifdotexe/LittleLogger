@@ -2,12 +2,13 @@
 This module will house all the utility functions that would be used along with littlelogger
 """
 
+from typing import Union
 from pathlib import Path
 
 import pandas as pd
 
 
-def load_log(log_file_path: Path) -> pd.DataFrame:
+def load_log(log_file_path: Union[str, Path]) -> pd.DataFrame:
     """
     Load and normalize the provided LittleLogger JSONL log file.
 
